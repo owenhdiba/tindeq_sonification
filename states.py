@@ -31,7 +31,7 @@ class CountDownState(State):
 class RestState(State):
     color = 'red'
     def end(self, controller):
-        if controller.reps == 0:
+        if controller.sets == 0:
             controller.div.text = '00:00'
             controller.remove_callback()
             controller.doc.add_next_tick_callback(
@@ -47,7 +47,7 @@ class RestState(State):
 class ActiveState(State):
     color = 'green'
     def end(self, controller):
-        controller.reps -= 1
+        controller.sets -= 1
         controller.completed += 1
         controller.doc.add_next_tick_callback(
             lambda: controller.counter_slider.update(
