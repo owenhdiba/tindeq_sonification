@@ -1,10 +1,29 @@
+"""Search for, connect to, and communicate with Tindeq progressor.
+
+Connect to the Tindeq Progressor and send commands to control it. The load
+data is received and put into queues to be used in other parts of the program.
+
+Use as a context manager:
+    aysnc with TindeqProgressor(parent) as tindeq:
+            await tindeq.get_batt()
+On entry the context manager will search for and connect to the progressor,
+and on exit will disconnect. A full example is given at the end of this module.
+"""
 import struct
 import uuid
 import asyncio
 import queue
 from bleak import BleakClient, BleakScanner
 
-class TindeqProgressor(object):
+
+class TindeqProgressor:
+    """Communicate with Tindeq Progressor device over Bluetooth.
+
+       Send bytes to write UUID to control the device. Current weight or
+       rate of force is reported on the notify UUID, these are then pushed
+       to a tuple of queues to be used by consumers in other threads.
+    """
+
     response_codes = {"cmd_resp": 0, "weight_measure": 1, "low_pwr": 4}
     cmds = dict(
         TARE_SCALE=0x64,
@@ -26,34 +45,26 @@ class TindeqProgressor(object):
 
     def __init__(self, queues, queue_function):
         """
-        Uses Bluetooth 4 (LE) to communicate with Tindeq Progressor
+        Initializes the instance with queues and function that processes them.
 
-        Send bytes to write UUID to control the device. Current weight or
-        rate of force is reported on the notify UUID, so use callbacks to do
-        something when you receive info on this UUID.
-
-        Use as a context manager:
-
-            aysnc with TindeqProgressor(parent) as tindeq:
-                await tindeq.get_batt()
-
-        Parameters
-        ----------
-        queues: tuple
-            holds queues that data from the sensor is pushed to
-        queue_function:
-            takes queues, time and weight from `_notify_handler` method
-            and pushes the sensor data to the queues. This function must have
-            the form:
-                def f(queue1, ..., queueN, time, weight):
-                    ...
-            where in the function body the data is pushed to the queues.
+        Args:
+            queues:
+                tuple of queues that data from the sensor is pushed to
+            queue_function:
+                function that takes queues, time and weight from `_notify_handler`
+                method and pushes the sensor data to the queues. This function
+                must have the form:
+                    def f(queue1, ..., queueN, time, weight):
+                        ...
+                where in the function body the data is put into the queues.
         """
         self.queues = queues
         self.queue_function = queue_function
         self.info_struct = struct.Struct("<bb")
         self.data_struct = struct.Struct("<fl")
         self._tare_value = 0.0
+        self.client = None
+        self.last_cmd = None
 
     async def __aenter__(self):
         await self.connect()
@@ -103,6 +114,7 @@ class TindeqProgressor(object):
     async def connect(self):
         stop_event = asyncio.Event()
         TARGET_NAME = "Progressor"
+
         def callback(device, _):
             try:
                 name_true = device.name[: len(TARGET_NAME)] == TARGET_NAME
@@ -179,6 +191,10 @@ class TindeqProgressor(object):
         return weight_sum / samples
 
     async def soft_tare(self):
+        """
+        Calibrate the device by taking average of weights over one-second
+        window.
+        """
         _saved_queue_function = self.queue_function
         _saved_queues = self.queues
 
@@ -200,8 +216,12 @@ class TindeqProgressor(object):
         self.queue_function = _saved_queue_function
 
 
-
 if __name__ == "__main__":
+    '''Example usage of the class. The `example` coroutine uses the async 
+    context manager to connect to the Progressor, then sends it a series of 
+    commands. The `printer` function is run in another thread and 
+    receives weight data via `print_queue`, then prints the time and weight.
+    '''
     async def example(print_queue, queue_func):
         loop = asyncio.get_running_loop()
         async with TindeqProgressor((print_queue,), queue_func) as tindeq:
@@ -218,7 +238,7 @@ if __name__ == "__main__":
             try:
                 async with asyncio.timeout(2):
                     await asyncio.gather(
-                        loop.run_in_executor(None, consumer,
+                        loop.run_in_executor(None, printer,
                                              print_queue),
                         tindeq.start_logging_weight()
                     )
@@ -227,7 +247,7 @@ if __name__ == "__main__":
                 print("Done!")
 
 
-    def consumer(print_queue):
+    def printer(print_queue):
         while True:
             try:
                 vals = print_queue.get_nowait()
@@ -238,7 +258,12 @@ if __name__ == "__main__":
                     break
                 print(vals)
 
+
     print_queue = queue.Queue()
+
+
     def queue_func(print_queue, read_time, read_weight):
         print_queue.put_nowait((read_time, read_weight))
+
+
     asyncio.run(example(print_queue, queue_func))
