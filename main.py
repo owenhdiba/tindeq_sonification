@@ -1,3 +1,9 @@
+"""
+Run the Bokeh server, connect to the Tindeq Progressor, generate and play
+sonified data from Progressor.
+
+"""
+
 import queue
 from audio import Audio
 from tindeq import TindeqProgressor
@@ -8,6 +14,7 @@ from bokeh.application.handlers.function import FunctionHandler
 import tornado
 
 
+# Controls how data is put into the queues.
 def queue_function(plot_queue, sound_queue, sensor_time, sensor_weight):
     if sound_queue.full():
         sound_queue.get_nowait()
@@ -15,6 +22,8 @@ def queue_function(plot_queue, sound_queue, sensor_time, sensor_weight):
     plot_queue.put_nowait((sensor_time, sensor_weight))
 
 
+# Create the TindeqProgressor, Controller, and Audio objects and
+# the queues that are used to share data between them.
 audio = Audio()
 plot_queue = queue.Queue()
 audio_queue = queue.Queue(maxsize=1)

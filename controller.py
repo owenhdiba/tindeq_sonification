@@ -3,9 +3,12 @@ import tornado
 from states import *
 from bokeh.plotting import figure
 from bokeh.layouts import row, column
-from bokeh.models import Button, Slider, Div, Band, Whisker, ColumnDataSource
+from bokeh.models import Button, Slider, Div, ColumnDataSource
 
-class Controller():
+
+class Controller:
+    """Manages the TindeqProgressor, Bokeh server and Audio objects.
+    """
     def __init__(self, sensor, audio, plot_queue, audio_queue, timer_queue):
         self.sensor = sensor
         self.audio = audio
@@ -29,11 +32,15 @@ class Controller():
             },
         )
         self.counter_slider = Slider(start=0, end=self.sets,
-                            value=self.completed,
-                            step=1, title="Completed Sets", disabled=True)
+                                     value=self.completed,
+                                     step=1, title="Completed Sets", disabled=True)
         self.doc = None
+        self.callback = None
+        self.btn = None
+
     def remove_callback(self):
         self.doc.remove_periodic_callback(self.callback)
+
     def make_document(self, doc):
         self.doc = doc
         io_loop = tornado.ioloop.IOLoop.current()
@@ -47,19 +54,20 @@ class Controller():
         doc.title = "Tindeq Sonification"
 
         active_slider = Slider(start=4, end=20,
-                                    value=self.active_time,
-                                    step=1, title="Active Time (s)")
+                               value=self.active_time,
+                               step=1, title="Active Time (s)")
         rest_slider = Slider(start=10, end=180,
-                                  value=self.rest_time,
-                                  step=10, title="Rest Time (s)")
+                             value=self.rest_time,
+                             step=10, title="Rest Time (s)")
         target_slider = Slider(start=1, end=100,
-                                    value=self.target_load,
-                                    step=1, title="Target Load (kg)")
+                               value=self.target_load,
+                               step=1, title="Target Load (kg)")
         set_slider = Slider(start=1, end=20,
                             value=self.sets,
                             step=1, title="Sets")
 
         btn = Button(label="Searching for device...", disabled=True)
+
         def onclick():
             for widget in widgets:
                 widget.disabled = True
@@ -70,7 +78,7 @@ class Controller():
             self.audio.set_target(self.target_load)
             self.sets = set_slider.value
             duration = ((self.rest_time + self.active_time)
-                      * self.sets + self.countdown)
+                        * self.sets + self.countdown)
             self.duration = duration
             self.counter_slider.end = self.sets
             io_loop = tornado.ioloop.IOLoop.current()
@@ -82,6 +90,7 @@ class Controller():
             doc.add_next_tick_callback(
                 lambda: btn.update(label="Running")
             )
+
         btn.on_click(onclick)
         self.btn = btn
 
@@ -102,8 +111,10 @@ class Controller():
             self.state.update(self)
 
 
-
 async def connect_from_doc(controller, sensor):
+    """
+    Connect to the Tindeq Progressor.
+    """
     try:
         await sensor.connect()
     except Exception as err:
@@ -121,7 +132,11 @@ async def connect_from_doc(controller, sensor):
             lambda: controller.btn.update(label="Run", disabled=False)
         )
 
+
 async def main(sensor, audio, sound_queue, timer_queue, duration):
+    """
+    Tares the Progressor, then starts receiving weight data and playing audio.
+    """
     await sensor.soft_tare()
     with audio.play_audio(sound_queue, timer_queue) as stream:
         await sensor.start_logging_weight()
